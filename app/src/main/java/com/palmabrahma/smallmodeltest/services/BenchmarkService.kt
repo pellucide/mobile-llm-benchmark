@@ -45,6 +45,8 @@ class BenchmarkService : Service() {
         const val EXTRA_TOKENS_PER_SECOND = "tokens_per_second"
         const val EXTRA_BATTERY_LEVEL = "battery_level"
         const val EXTRA_MEMORY_MB = "memory_mb"
+        const val EXTRA_CPU_USAGE = "cpu_usage"
+        const val EXTRA_TEMPERATURE = "temperature"
         const val EXTRA_RESULT_FILE = "result_file"
         const val EXTRA_ERROR_MESSAGE = "error_message"
 
@@ -124,13 +126,18 @@ class BenchmarkService : Service() {
 
                 val model = createModelAdapter(modelType)
 
+                // Track latest tokens per second
+                var latestTokensPerSecond = 0f
+
                 // Start metrics collection in background
                 val metricsJob = launch {
                     metricsCollector.startCollection(1000).collect { metrics ->
                         broadcastMetrics(
                             batteryLevel = metrics.batteryLevel,
                             memoryMB = metrics.memoryUsedMB,
-                            tokensPerSecond = 0f // Will be updated by benchmark
+                            tokensPerSecond = latestTokensPerSecond,
+                            cpuUsage = metrics.cpuUsagePercent,
+                            temperature = metrics.cpuTemperature ?: 0f
                         )
                     }
                 }
@@ -142,7 +149,13 @@ class BenchmarkService : Service() {
                         benchmarkRunner.runBasicPerformanceTest(model)
                     }
                     "SUSTAINED" -> {
-                        benchmarkRunner.runSustainedConversationTest(model, durationMinutes)
+                        benchmarkRunner.runSustainedConversationTest(
+                            model = model,
+                            durationMinutes = durationMinutes,
+                            onMetricsUpdate = { tokensPerSecond ->
+                                latestTokensPerSecond = tokensPerSecond
+                            }
+                        )
                     }
                     "ROUTING" -> {
                         benchmarkRunner.runRoutingClassificationTest(model)
@@ -321,36 +334,48 @@ class BenchmarkService : Service() {
     // Broadcast methods for UI updates
     private fun broadcastProgress(message: String) {
         val intent = Intent(BROADCAST_PROGRESS).apply {
+            setPackage(packageName) // Make broadcast explicit to this app
             putExtra(EXTRA_PROGRESS_MESSAGE, message)
         }
         sendBroadcast(intent)
+        Timber.d("Broadcast sent: PROGRESS with message: $message")
     }
 
     private fun broadcastMetrics(
         tokensPerSecond: Float,
         batteryLevel: Float,
-        memoryMB: Long
+        memoryMB: Long,
+        cpuUsage: Float = 0f,
+        temperature: Float = 0f
     ) {
+        Timber.d("Broadcasting metrics.. tokens/s: $tokensPerSecond, battery: $batteryLevel")
         val intent = Intent(BROADCAST_PROGRESS).apply {
+            setPackage(packageName) // Make broadcast explicit to this app
             putExtra(EXTRA_TOKENS_PER_SECOND, tokensPerSecond)
             putExtra(EXTRA_BATTERY_LEVEL, batteryLevel)
             putExtra(EXTRA_MEMORY_MB, memoryMB)
+            putExtra(EXTRA_CPU_USAGE, cpuUsage)
+            putExtra(EXTRA_TEMPERATURE, temperature)
         }
         sendBroadcast(intent)
     }
 
     private fun broadcastComplete(resultFile: String) {
         val intent = Intent(BROADCAST_COMPLETE).apply {
+            setPackage(packageName) // Make broadcast explicit to this app
             putExtra(EXTRA_RESULT_FILE, resultFile)
         }
         sendBroadcast(intent)
+        Timber.d("Broadcast sent: COMPLETE with file: $resultFile")
     }
 
     private fun broadcastError(error: String) {
         val intent = Intent(BROADCAST_ERROR).apply {
+            setPackage(packageName) // Make broadcast explicit to this app
             putExtra(EXTRA_ERROR_MESSAGE, error)
         }
         sendBroadcast(intent)
+        Timber.d("Broadcast sent: ERROR with message: $error")
     }
 
     override fun onDestroy() {

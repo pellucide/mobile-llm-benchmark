@@ -12,7 +12,9 @@ import kotlinx.coroutines.flow.*
 import timber.log.Timber
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Context.RECEIVER_NOT_EXPORTED
 import android.content.Intent
+import android.content.IntentFilter
 import com.palmabrahma.smallmodeltest.models.ModelType
 import com.palmabrahma.smallmodeltest.services.BenchmarkService
 
@@ -31,12 +33,15 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
     // Broadcast receiver for service updates
     private val benchmarkReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
+            Timber.d("Received metrics broadcast.. action=${intent?.action}")
             when (intent?.action) {
                 BenchmarkService.BROADCAST_PROGRESS -> {
                     val message = intent.getStringExtra(BenchmarkService.EXTRA_PROGRESS_MESSAGE)
                     val tokensPerSecond = intent.getFloatExtra(BenchmarkService.EXTRA_TOKENS_PER_SECOND, 0f)
                     val batteryLevel = intent.getFloatExtra(BenchmarkService.EXTRA_BATTERY_LEVEL, 100f)
                     val memoryMB = intent.getLongExtra(BenchmarkService.EXTRA_MEMORY_MB, 0)
+                    val cpuUsage = intent.getFloatExtra(BenchmarkService.EXTRA_CPU_USAGE, 0f)
+                    val temperature = intent.getFloatExtra(BenchmarkService.EXTRA_TEMPERATURE, 0f)
 
                     _uiState.update { state ->
                         state.copy(
@@ -44,8 +49,8 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
                                 tokensPerSecond = tokensPerSecond,
                                 batteryLevel = batteryLevel,
                                 memoryUsedMB = memoryMB,
-                                cpuUsage = state.currentMetrics?.cpuUsage ?: 0f,
-                                temperature = state.currentMetrics?.temperature ?: 0f
+                                cpuUsage = cpuUsage,
+                                temperature = temperature
                             )
                         )
                     }
@@ -71,6 +76,20 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         Timber.plant(Timber.DebugTree())
+
+        // Register broadcast receiver for service updates
+        val filter = IntentFilter().apply {
+            addAction(BenchmarkService.BROADCAST_PROGRESS)
+            addAction(BenchmarkService.BROADCAST_COMPLETE)
+            addAction(BenchmarkService.BROADCAST_ERROR)
+        }
+
+        try {
+            getApplication<Application>().registerReceiver(benchmarkReceiver, filter, RECEIVER_NOT_EXPORTED)
+            Timber.d("BroadcastReceiver registered successfully")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to register BroadcastReceiver")
+        }
     }
 
     fun selectModel(model: ModelType) {

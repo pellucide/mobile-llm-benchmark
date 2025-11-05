@@ -6,13 +6,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- No external storage permissions needed - using app-specific storage -->
-    <!-- Model files stored in: /data/data/com.llmtest.hybrid/files/ -->
-    <!-- Cache stored in: /data/data/com.llmtest.hybrid/cache/ -->
-
     <!-- Foreground service permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- No external storage permissions needed - using app-specific storage -->
+    <!-- Model files stored in: /data/data/com.llmtest.hybrid/files/ -->
+    <!-- Cache stored in: /data/data/com.llmtest.hybrid/cache/ -->
 
     <!-- Battery monitoring -->
     <uses-permission android:name="android.permission.BATTERY_STATS"
@@ -23,7 +23,6 @@
 
     <!-- System metrics -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-
 
     <application
         android:allowBackup="true"
@@ -40,17 +39,19 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.SmallModelTest">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
         <service
             android:name=".services.BenchmarkService"
-            android:foregroundServiceType="mediaProcessing"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
     </application>
 
 </manifest>

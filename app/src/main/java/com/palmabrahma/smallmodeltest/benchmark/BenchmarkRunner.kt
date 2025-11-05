@@ -221,7 +221,8 @@ class BenchmarkRunner(
      */
     suspend fun runSustainedConversationTest(
         model: BaseModelAdapter,
-        durationMinutes: Int = 30
+        durationMinutes: Int = 30,
+        onMetricsUpdate: ((tokensPerSecond: Float) -> Unit)? = null
     ): BenchmarkResults = coroutineScope {
 
         Timber.d("Starting sustained conversation test for ${model.modelName}")
@@ -282,17 +283,22 @@ class BenchmarkRunner(
             val totalTime = System.currentTimeMillis() - promptStartTime
             val endMetrics = metricsCollector.collectCurrentMetrics()
 
+            val tokensPerSec = (tokensGenerated * 1000f) / totalTime
+
             promptResults.add(PromptResult(
                 prompt = prompt,
                 responseText = responseBuilder.toString(),
                 firstTokenLatencyMs = firstTokenTime,
                 totalTimeMs = totalTime,
                 tokensGenerated = tokensGenerated,
-                tokensPerSecond = (tokensGenerated * 1000f) / totalTime,
+                tokensPerSecond = tokensPerSec,
                 peakMemoryMB = aggregator.getPeakMemory(),
                 avgCpuPercent = aggregator.getAverageCpu(),
                 batteryDrainPercent = startMetrics.batteryLevel - endMetrics.batteryLevel
             ))
+
+            // Report metrics to callback
+            onMetricsUpdate?.invoke(tokensPerSec)
 
             conversationIndex++
 
