@@ -395,11 +395,11 @@ fun ResultsCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            LazyColumn(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(results) { result ->
+                results.forEach { result ->
                     ResultItem(result)
                 }
             }

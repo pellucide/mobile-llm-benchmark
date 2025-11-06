@@ -202,28 +202,12 @@ class Phi3MiniAdapter(
     }
     
     override suspend fun classifyComplexity(prompt: String): Float = withContext(Dispatchers.IO) {
-        // Simple heuristic for complexity classification
-        // In production, this would use the model itself
-        val wordCount = prompt.split(" ").size
-        val hasCode = prompt.contains("```") || prompt.contains("function") || prompt.contains("def ")
-        val hasMath = prompt.contains("solve") || prompt.contains("calculate") || prompt.contains("equation")
-        val hasAnalysis = prompt.contains("analyze") || prompt.contains("explain") || prompt.contains("compare")
-        
-        var score = 0.1f
-        
-        // Word count factor
-        score += minOf(wordCount / 100f, 0.3f)
-        
-        // Content type factors
-        if (hasCode) score += 0.3f
-        if (hasMath) score += 0.2f
-        if (hasAnalysis) score += 0.2f
-        
-        // Length factor for very short prompts
-        if (wordCount < 5) score = 0.1f
-        if (prompt.length < 10) score = 0.05f
-        
-        minOf(score, 1.0f)
+        // Delegate to ComplexityClassifier for consistency
+        val classifier = ComplexityClassifier()
+        //val result = classifier.classifyWithHeuristics(prompt)
+        //val result = classifier.classifyHybrid(prompt, this@Phi3MiniAdapter)
+        val result = classifier.classifyWithModel(prompt, this@Phi3MiniAdapter)
+        result.score
     }
     
     override suspend fun cleanup() = withContext(Dispatchers.IO) {
