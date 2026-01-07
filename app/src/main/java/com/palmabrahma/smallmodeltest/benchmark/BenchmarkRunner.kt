@@ -234,10 +234,11 @@ class BenchmarkRunner(
 
                 val totalTime = System.currentTimeMillis() - promptStartTime
                 val endMetrics = metricsCollector.collectCurrentMetrics()
+                val responseText = responseBuilder.toString()
 
                 promptResults.add(PromptResult(
                     prompt = prompt,
-                    responseText = responseBuilder.toString(),
+                    responseText = responseText,
                     firstTokenLatencyMs = firstTokenTime,
                     totalTimeMs = totalTime,
                     tokensGenerated = tokensGenerated,

@@ -1,6 +1,7 @@
 package com.palmabrahma.smallmodeltest.models
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
@@ -57,7 +58,7 @@ class ComplexityClassifier {
 
     /**
      * Classify using the LLM itself (more accurate but slower)
-     * This would be implemented when the model is fully functional
+     * NOTE: Currently limited by dummy tokenization implementation
      */
     suspend fun classifyWithModel(
         prompt: String,
@@ -78,12 +79,108 @@ class ComplexityClassifier {
         """.trimMargin()
 
         try {
-            // This would use the model to generate a complexity score
-            // For now, fall back to heuristics
-            Timber.d("Model-based classification not yet implemented, using heuristics")
-            return@withContext classifyWithHeuristics(prompt)
+            // Check if model is ready
+            if (!model.isReady()) {
+                Timber.w("Model not ready, falling back to heuristics")
+                return@withContext classifyWithHeuristics(prompt)
+            }
+
+            // Use the model to generate a complexity score
+            val generatedTokens = StringBuilder()
+            var tokensCollected = 0
+            val maxTokensToCollect = 10  // We only need a short response
+
+            Timber.d("Starting model-based classification for prompt: ${prompt.take(50)}...")
+
+            // Collect tokens from the model
+            model.generateTokens(
+                prompt = classificationPrompt,
+                maxTokens = maxTokensToCollect,
+                temperature = 0.3f  // Lower temperature for more consistent results
+            ).collect { result ->
+                generatedTokens.append(result.token)
+                tokensCollected++
+
+                // Log progress
+                if (tokensCollected % 5 == 0 || result.isComplete) {
+                    Timber.d("Collected $tokensCollected tokens, current output: $generatedTokens")
+                }
+            }
+
+            val generatedText = generatedTokens.toString().trim()
+            Timber.d("Model generated complete response: '$generatedText'")
+
+            // Try to extract score from the generated text
+            var extractedScore: Float? = null
+
+            // Try multiple patterns to extract a number
+            val patterns = listOf(
+                Regex("\\d*\\.?\\d+"),  // Any number
+                Regex("^\\s*(\\d*\\.?\\d+)"),  // Number at start
+                Regex("(\\d*\\.?\\d+)\\s*$")  // Number at end
+            )
+
+            for (pattern in patterns) {
+                val matchResult = pattern.find(generatedText)
+                if (matchResult != null) {
+                    try {
+                        val parsedScore = matchResult.value.toFloat()
+                        if (parsedScore in 0.0f..1.0f) {
+                            extractedScore = parsedScore
+                            Timber.d("Successfully extracted score: $extractedScore using pattern: $pattern")
+                            break
+                        }
+                    } catch (e: NumberFormatException) {
+                        Timber.w("Failed to parse '${matchResult.value}' as float")
+                    }
+                }
+            }
+
+            // If we couldn't extract a valid score, use heuristics as fallback
+            val finalScore: Float
+            val confidence: Float
+
+            if (extractedScore != null) {
+                finalScore = extractedScore
+                confidence = 0.7f  // Moderate confidence since tokenization is dummy
+                Timber.d("Using model-extracted score: $finalScore")
+            } else {
+                // Blend heuristics with a default middle value
+                Timber.w("Could not extract valid score from model output. Using heuristic fallback.")
+                val heuristicResult = classifyWithHeuristics(prompt)
+
+                // Since tokenization is dummy, heavily weight the heuristics
+                finalScore = heuristicResult.score * 0.9f + 0.5f * 0.1f
+                confidence = 0.3f  // Low confidence due to fallback
+
+                Timber.d("Using blended fallback score: $finalScore (90% heuristics, 10% default)")
+            }
+
+            // Convert the score to a full ClassificationResult
+            val level = scoreToLevel(finalScore)
+
+            // Generate feature breakdown based on the final score
+            // This is an approximation since the model doesn't provide detailed features
+            val features = FeatureScores(
+                lengthScore = finalScore * 0.2f,
+                vocabularyScore = finalScore * 0.15f,
+                structureScore = finalScore * 0.15f,
+                domainScore = finalScore * 0.25f,
+                questionTypeScore = finalScore * 0.2f,
+                technicalScore = finalScore * 0.05f
+            )
+
+            Timber.d("Model classification complete: score=$finalScore, level=$level, confidence=$confidence")
+
+            return@withContext ClassificationResult(
+                score = finalScore,
+                level = level,
+                confidence = confidence,
+                features = features
+            )
+
         } catch (e: Exception) {
-            Timber.e(e, "Model classification failed, falling back to heuristics")
+            Timber.e(e, "Model classification failed, falling back to heuristics. Error: ${e.message}")
             return@withContext classifyWithHeuristics(prompt)
         }
     }

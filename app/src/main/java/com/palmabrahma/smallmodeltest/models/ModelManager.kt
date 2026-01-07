@@ -27,6 +27,7 @@ class ModelManager(private val context: Context) {
         const val PHI3_TOKENIZER_NAME = "tokenizer.json"
         const val PHI3_TOKENIZER_MODEL_NAME = "tokenizer.model"
         const val PHI3_CONFIG_NAME = "tokenizer_config.json"
+        const val PHI3_GENAI_CONFIG_NAME = "genai_config.json"
         const val PHI3_SPECIAL_TOKENS_NAME = "special_tokens_map.json"
         
         const val GEMMA_MODEL_NAME = "gemma-2b-q4.gguf"
@@ -41,6 +42,7 @@ class ModelManager(private val context: Context) {
         const val PHI3_TOKENIZER_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer.json"
         const val PHI3_TOKENIZER_MODEL_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer.model"
         const val PHI3_CONFIG_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer_config.json"
+        const val PHI3_GENAI_CONFIG_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json"
         const val PHI3_SPECIAL_TOKENS_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/special_tokens_map.json"
         
         // Directory names
@@ -203,6 +205,12 @@ class ModelManager(private val context: Context) {
                 1
             ),
             FileToDownload(
+                PHI3_GENAI_CONFIG_URL,
+                PHI3_GENAI_CONFIG_NAME,
+                "GenAi_Configuration",
+                1
+            ),
+            FileToDownload(
                 PHI3_SPECIAL_TOKENS_URL, 
                 PHI3_SPECIAL_TOKENS_NAME, 
                 "Special Tokens",
@@ -301,40 +309,66 @@ class ModelManager(private val context: Context) {
         //withContext(Dispatchers.IO) {
             try {
                 Timber.d("Downloading from: $url")
-                
+
                 val request = Request.Builder()
                     .url(url)
                     .build()
-                
+
                 val response = okHttpClient.newCall(request).execute()
-                
-                if (!response.isSuccessful) {
-                    throw IOException("Failed to download: ${response.code}")
+
+                // Handle various HTTP response codes
+                when (response.code) {
+                    in 200..299 -> {
+                        // Success codes
+                    }
+                    301, 302, 303, 307, 308 -> {
+                        // Redirects - OkHttp should follow automatically, but if we get here, something's wrong
+                        throw IOException("Server returned redirect without location. URL may have moved.")
+                    }
+                    404 -> throw IOException("File not found on server (404)")
+                    403 -> throw IOException("Access denied (403). Check download permissions.")
+                    429 -> throw IOException("Too many download requests (429). Please try again later.")
+                    in 500..599 -> throw IOException("Server error (${response.code}). Please try again later.")
+                    else -> throw IOException("Failed to download: HTTP ${response.code} ${response.message}")
                 }
-                
-                val body = response.body ?: throw IOException("Empty response body")
+
+                val body = response.body
+                    ?: throw IOException("Empty response body from server")
+
                 val contentLength = body.contentLength()
-                
+
+                // Validate content length is reasonable
+                if (contentLength == 0L) {
+                    throw IOException("Server returned empty file (0 bytes)")
+                }
+
+                // Check if we have enough disk space (with 10% buffer)
+                val requiredSpace = contentLength * 1.1 // 10% buffer
+                val availableSpace = destination.parentFile?.usableSpace ?: Long.MAX_VALUE
+                if (availableSpace < requiredSpace) {
+                    throw IOException("Not enough disk space. Need ${requiredSpace / (1024 * 1024)}MB, have ${availableSpace / (1024 * 1024)}MB")
+                }
+
                 // Create parent directories if needed
                 destination.parentFile?.mkdirs()
-                
+
                 // Write to file with progress updates
+                var totalBytesRead = 0L
                 body.byteStream().use { input ->
                     FileOutputStream(destination).use { output ->
                         val buffer = ByteArray(8192)
                         var bytesRead: Int
-                        var totalBytesRead = 0L
-                        
+
                         while (input.read(buffer).also { bytesRead = it } != -1) {
                             output.write(buffer, 0, bytesRead)
                             totalBytesRead += bytesRead
-                            
+
                             val progress = if (contentLength > 0) {
                                 (totalBytesRead.toFloat() / contentLength) * 100
                             } else {
                                 0f
                             }
-                            
+
                             emit(SingleFileProgress(
                                 bytesDownloaded = totalBytesRead,
                                 totalBytes = contentLength,
@@ -343,10 +377,16 @@ class ModelManager(private val context: Context) {
                         }
                     }
                 }
-                
-                Timber.d("Download complete: ${destination.name}")
-                
+
+                // Verify file was fully downloaded
+                if (contentLength > 0 && destination.length() != contentLength) {
+                    throw IOException("Download incomplete. Expected $contentLength bytes, got ${destination.length()} bytes")
+                }
+
+                Timber.d("Download complete: ${destination.name} (${totalBytesRead / (1024 * 1024)}MB)")
+
             } catch (e: Exception) {
+                Timber.e(e, "Download failed for: $url")
                 // Clean up partial file on error
                 if (destination.exists()) {
                     destination.delete()

@@ -42,10 +42,20 @@ class MetricsCollector(private val context: Context) {
         val avgCpuPercent: Float,
         val batteryDrainPercent: Float
     )
-    
+
     private var lastCpuTime = 0L
     private var lastAppCpuTime = 0L
-    
+
+    /**
+     * Reset internal state between benchmark sessions
+     * Call this before starting a new benchmark to avoid stale data
+     */
+    fun reset() {
+        lastCpuTime = 0L
+        lastAppCpuTime = 0L
+        Timber.d("MetricsCollector state reset")
+    }
+
     /**
      * Start collecting metrics at specified interval
      */

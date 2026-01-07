@@ -17,6 +17,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import com.palmabrahma.smallmodeltest.models.ModelType
 import com.palmabrahma.smallmodeltest.services.BenchmarkService
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 class BenchmarkViewModel(application: Application) : AndroidViewModel(application) {
@@ -29,6 +30,12 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var currentBenchmarkJob: Job? = null
     private var metricsCollectionJob: Job? = null
+
+    // Atomic flag to prevent concurrent start/stop operations
+    private val isBenchmarkOperationInProgress = AtomicBoolean(false)
+
+    // Track whether receiver is registered to prevent leaks
+    private var isReceiverRegistered = false
 
     // Broadcast receiver for service updates
     private val benchmarkReceiver = object : BroadcastReceiver() {
@@ -86,9 +93,11 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
 
         try {
             getApplication<Application>().registerReceiver(benchmarkReceiver, filter, RECEIVER_NOT_EXPORTED)
+            isReceiverRegistered = true
             Timber.d("BroadcastReceiver registered successfully")
         } catch (e: Exception) {
             Timber.e(e, "Failed to register BroadcastReceiver")
+            isReceiverRegistered = false
         }
     }
 
@@ -123,9 +132,19 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
         val selectedModel = _uiState.value.selectedModel ?: return
         val selectedTest = _uiState.value.selectedTest
 
+        // Prevent concurrent start operations
+        if (!isBenchmarkOperationInProgress.compareAndSet(false, true)) {
+            Timber.w("Start benchmark already in progress, ignoring duplicate request")
+            return
+        }
+
+        // Reset metrics collector state before starting new benchmark
+        metricsCollector.reset()
+
         // For long tests (>10 minutes), use the service to prevent app termination
         if (selectedTest == TestType.SUSTAINED) {
             startBenchmarkInService(selectedModel, selectedTest)
+            isBenchmarkOperationInProgress.set(false)
             return
         }
 
@@ -186,6 +205,7 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             } finally {
                 stopMetricsCollection()
+                isBenchmarkOperationInProgress.set(false)
             }
         }
     }
@@ -199,6 +219,9 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
         currentBenchmarkJob?.cancel()
         stopMetricsCollection()
         _uiState.update { it.copy(isRunning = false) }
+
+        // Reset the operation flag to allow new benchmarks to start
+        isBenchmarkOperationInProgress.set(false)
     }
 
     private fun createModelAdapter(modelType: ModelType): BaseModelAdapter {
@@ -287,10 +310,22 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         super.onCleared()
         stopBenchmark()
-        try {
-            getApplication<Application>().unregisterReceiver(benchmarkReceiver)
-        } catch (e: Exception) {
-            Timber.e(e, "Error unregistering receiver")
+        unregisterReceiverIfNeeded()
+    }
+
+    private fun unregisterReceiverIfNeeded() {
+        if (isReceiverRegistered) {
+            try {
+                getApplication<Application>().unregisterReceiver(benchmarkReceiver)
+                Timber.d("BroadcastReceiver unregistered successfully")
+            } catch (e: IllegalArgumentException) {
+                // Receiver was not registered - ignore and clear flag
+                Timber.w(e, "Receiver was not registered, clearing flag")
+            } catch (e: Exception) {
+                Timber.e(e, "Error unregistering receiver")
+            } finally {
+                isReceiverRegistered = false
+            }
         }
     }
 }

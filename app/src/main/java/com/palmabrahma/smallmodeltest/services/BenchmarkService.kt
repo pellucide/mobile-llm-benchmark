@@ -99,15 +99,28 @@ class BenchmarkService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START_BENCHMARK -> {
-                val modelType = intent.getStringExtra(EXTRA_MODEL_TYPE) ?: return START_NOT_STICKY
-                val testType = intent.getStringExtra(EXTRA_TEST_TYPE) ?: return START_NOT_STICKY
+                val modelType = intent.getStringExtra(EXTRA_MODEL_TYPE)
+                val testType = intent.getStringExtra(EXTRA_TEST_TYPE)
                 val duration = intent.getIntExtra(EXTRA_DURATION_MINUTES, 30)
+
+                // Validate required intent extras
+                if (modelType == null || testType == null) {
+                    Timber.e("Missing required intent extras: modelType=$modelType, testType=$testType")
+                    broadcastError("Missing required parameters. Please try again.")
+                    // Properly clean up before returning
+                    releaseWakeLock()
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
 
                 startForeground(NOTIFICATION_ID, createNotification("Initializing benchmark..."))
                 runBenchmark(modelType, testType, duration)
             }
             ACTION_STOP_BENCHMARK -> {
                 stopBenchmark()
+            }
+            null -> {
+                Timber.w("Received null intent action, ignoring")
             }
         }
 
@@ -180,8 +193,17 @@ class BenchmarkService : Service() {
                 updateNotification("Benchmark failed: ${e.message}")
                 broadcastError(e.message ?: "Unknown error")
             } finally {
-                // Keep service alive for a bit to ensure results are saved
-                delay(5000)
+                // IMPORTANT: Release WakeLock immediately before any delay
+                // This prevents battery drain if service is killed during the delay
+                releaseWakeLock()
+
+                // Keep service alive briefly to ensure results broadcast is delivered
+                try {
+                    delay(1000) // Reduced from 5000ms to 1000ms
+                } catch (e: CancellationException) {
+                    Timber.w("Delay cancelled, service likely being destroyed")
+                }
+
                 stopSelf()
             }
         }
@@ -313,9 +335,11 @@ class BenchmarkService : Service() {
             PowerManager.PARTIAL_WAKE_LOCK,
             "LLMBenchmark::WakeLock"
         ).apply {
-            acquire(60 * 60 * 1000L) // Max 60 minutes
+            // Don't use timeout - we're a foreground service which has its own lifecycle guarantees
+            // Using a timeout could cause the device to sleep during long benchmarks
+            acquire()
         }
-        Timber.d("WakeLock acquired")
+        Timber.d("WakeLock acquired (no timeout - tied to service lifecycle)")
     }
 
     private fun releaseWakeLock() {
@@ -328,6 +352,8 @@ class BenchmarkService : Service() {
             }
         } catch (e: Exception) {
             Timber.e(e, "Error releasing WakeLock")
+        } finally {
+            wakeLock = null
         }
     }
 

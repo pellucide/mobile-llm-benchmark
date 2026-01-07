@@ -89,4 +89,13 @@ dependencies {
 
     // Logging
     implementation(libs.timber)
+
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.5.1")
+
+    // Testing dependencies
+    testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:1.9.0")
+
+    implementation(files("libs/onnxruntime-genai-android-0.10.0.aar"))
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
 }

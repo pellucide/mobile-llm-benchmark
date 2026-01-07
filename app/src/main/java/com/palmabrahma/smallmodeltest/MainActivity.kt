@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -87,7 +88,8 @@ fun BenchmarkScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val coroutineScope = rememberCoroutineScope()
-    val modelManager = remember { ModelManager(viewModel.getApplication()) }
+    val context = LocalContext.current
+    val modelManager = remember { ModelManager(context) }
     var showDownloadDialog by remember { mutableStateOf(false) }
     var modelToDownload by remember { mutableStateOf<ModelType?>(null) }
 
