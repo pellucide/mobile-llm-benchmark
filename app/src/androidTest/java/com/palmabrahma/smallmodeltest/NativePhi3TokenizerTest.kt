@@ -158,13 +158,9 @@ class NativePhi3TokenizerTest {
         )
 
         testCases.forEach { text ->
-            //val tokensUsingNative = nativePhi3Tokenizer.encode(text)
             val tokensUsingOnnx = onnxtokenizer.encode(text).getSequence(0)
-            //val reconstructed = nativePhi3Tokenizer.decode(tokensUsingNative)
             val decodedUsingOnnx = onnxtokenizer.decode(tokensUsingOnnx)
-            //assertEquals( "Comparing onnx with native failed for: '$text'",tokensUsingOnnx.toList(), tokensUsingNative)
-            //assertEquals( "Comparing decoded with onnx with that of native failed for: '$text'",decodedUsingOnnx, reconstructed)
-            //assertEquals( "Round-trip failed for: '$text'",text, reconstructed)
+            // Note: GenAI tokenizer adds a leading space, which is expected behavior
             assertEquals( "Round-trip failed for: '$text'", " $text", decodedUsingOnnx)
         }
     }

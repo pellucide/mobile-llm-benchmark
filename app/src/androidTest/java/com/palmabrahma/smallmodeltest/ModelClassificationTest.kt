@@ -2,12 +2,16 @@ package com.palmabrahma.smallmodeltest
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import ai.onnxruntime.genai.Model
+import ai.onnxruntime.genai.Tokenizer
 import com.palmabrahma.smallmodeltest.models.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Test
 import org.junit.runner.RunWith
 import timber.log.Timber
 import java.io.File
+import kotlin.system.measureTimeMillis
 
 /**
  * Instrumented test to compare model-based vs heuristic classification
@@ -49,74 +53,82 @@ class ModelClassificationTest {
             }
         }
 
-        // Check if tokenizer file exists
+        // Check if model directory exists
         val modelDir = modelManager.getModelDirectory(ModelType.PHI3_MINI)
-        val tokenizerFile = File(modelDir, ModelManager.PHI3_TOKENIZER_NAME)
+        val modelFile = modelManager.getModelFilePath(ModelType.PHI3_MINI)
 
-        println("Tokenizer file path: ${tokenizerFile.absolutePath}")
-        println("Tokenizer file exists: ${tokenizerFile.exists()}")
+        println("Model file path: ${modelFile.absolutePath}")
+        println("Model file exists: ${modelFile.exists()}")
 
-        if (tokenizerFile.exists()) {
-            println("Tokenizer file size: ${tokenizerFile.length()} bytes")
-        }
+        // If model is available, test tokenization and classification
+        if (modelFile.exists()) {
+            println("Model file size: ${modelFile.length()} bytes")
 
-        // Test tokenizer with sample text
-        val tokenizer = Phi3Tokenizer(context, tokenizerFile.absolutePath)
+            // Test tokenization with GenAI Tokenizer
+            println("\n=== Tokenization Test ===")
+            val loadTime = measureTimeMillis {
+                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val genaiModel = Model(modelFile.parent)
+                    val tokenizer = Tokenizer(genaiModel)
 
-        val testTexts = listOf(
-            "Hello world",
-            "What is 2+2?",
-            "Classify the complexity of this prompt on a scale of 0-1:",
-            "0.5",
-            "Write a Python function"
-        )
+                    val testTexts = listOf(
+                        "Hello world",
+                        "What is 2+2?",
+                        "Classify the complexity of this prompt on a scale of 0-1:",
+                        "0.5",
+                        "Write a Python function"
+                    )
 
-        println("\n=== Tokenization Test ===")
-        for (text in testTexts) {
-            val tokens = tokenizer.encode(text)
-            val decoded = tokenizer.decode(tokens)
-            println("Text: \"$text\"")
-            println("  Tokens (${tokens.size}): ${tokens.take(10).joinToString(", ")}")
-            println("  Decoded: \"$decoded\"")
-            println()
-        }
+                    for (text in testTexts) {
+                        val encoded = tokenizer.encode(text)
+                        val tokens = encoded.getSequence(0).toList()
+                        val decoded = tokenizer.decode(tokens.toIntArray())
+                        println("Text: \"$text\"")
+                        println("  Tokens (${tokens.size}): ${tokens.take(10).joinToString(", ")}")
+                        println("  Decoded: \"$decoded\"")
+                        println()
+                    }
 
-        // Test complexity classification
-        val classifier = ComplexityClassifier()
+                    genaiModel.close()
+                }
+            }
+            println("Tokenizer test completed in ${loadTime}ms")
 
-        val testPrompts = mapOf(
-            "Hi" to ComplexityLevel.TRIVIAL,
-            "What is 2+2?" to ComplexityLevel.SIMPLE,
-            "Explain photosynthesis" to ComplexityLevel.MEDIUM,
-            "Write a Python function to find prime numbers" to ComplexityLevel.COMPLEX
-        )
+            // Test complexity classification
+            val classifier = ComplexityClassifier()
 
-        println("\n=== Classification Comparison ===")
-        println("%-40s | %-12s | %-12s | %-8s | %-8s".format(
-            "Prompt", "Expected", "Heuristic", "H-Score", "H-Conf"
-        ))
-        println("-".repeat(85))
+            val testPrompts = mapOf(
+                "Hi" to ComplexityLevel.TRIVIAL,
+                "What is 2+2?" to ComplexityLevel.SIMPLE,
+                "Explain photosynthesis" to ComplexityLevel.MEDIUM,
+                "Write a Python function to find prime numbers" to ComplexityLevel.COMPLEX
+            )
 
-        for ((prompt, expected) in testPrompts) {
-            val heuristicResult = classifier.classifyWithHeuristics(prompt)
+            println("\n=== Classification Comparison ===")
+            println("%-40s | %-12s | %-12s | %-8s | %-8s".format(
+                "Prompt", "Expected", "Heuristic", "H-Score", "H-Conf"
+            ))
+            println("-".repeat(85))
 
-            val truncatedPrompt = if (prompt.length > 37) {
-                prompt.take(34) + "..."
-            } else {
-                prompt
+            for ((prompt, expected) in testPrompts) {
+                val heuristicResult = classifier.classifyWithHeuristics(prompt)
+
+                val truncatedPrompt = if (prompt.length > 37) {
+                    prompt.take(34) + "..."
+                } else {
+                    prompt
+                }
+
+                println("%-40s | %-12s | %-12s | %.3f   | %.2f".format(
+                    truncatedPrompt,
+                    expected,
+                    heuristicResult.level,
+                    heuristicResult.score,
+                    heuristicResult.confidence
+                ))
             }
 
-            println("%-40s | %-12s | %-12s | %.3f   | %.2f".format(
-                truncatedPrompt,
-                expected,
-                heuristicResult.level,
-                heuristicResult.score,
-                heuristicResult.confidence
-            ))
-        }
-
-        // If model is available, test model-based classification
-        if (modelManager.isModelDownloaded(ModelType.PHI3_MINI)) {
+            // Test model-based classification
             println("\n=== Model-Based Classification Test ===")
 
             try {
@@ -147,13 +159,12 @@ class ModelClassificationTest {
                 println("Error testing model: ${e.message}")
                 e.printStackTrace()
             }
+
         } else {
             println("\n⚠️  Model files not downloaded. Please download the Phi-3 model first.")
             println("   Download status:")
             println("   - Model file: ${File(modelDir, ModelManager.PHI3_MODEL_NAME).exists()}")
             println("   - Model data: ${File(modelDir, ModelManager.PHI3_MODEL_DATA_NAME).exists()}")
-            println("   - Tokenizer: ${tokenizerFile.exists()}")
-            println("   - Tokenizer model: ${File(modelDir, ModelManager.PHI3_TOKENIZER_MODEL_NAME).exists()}")
         }
     }
 }

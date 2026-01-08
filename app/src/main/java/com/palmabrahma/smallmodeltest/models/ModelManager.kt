@@ -29,8 +29,7 @@ class ModelManager(private val context: Context) {
         const val PHI3_CONFIG_NAME = "tokenizer_config.json"
         const val PHI3_GENAI_CONFIG_NAME = "genai_config.json"
         const val PHI3_SPECIAL_TOKENS_NAME = "special_tokens_map.json"
-        
-        const val GEMMA_MODEL_NAME = "gemma-2b-q4.gguf"
+
         const val TINYLLAMA_MODEL_NAME = "tinyllama-1.1b-q4.gguf"
         
         // HuggingFace repository base URL
@@ -44,11 +43,10 @@ class ModelManager(private val context: Context) {
         const val PHI3_CONFIG_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/tokenizer_config.json"
         const val PHI3_GENAI_CONFIG_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/genai_config.json"
         const val PHI3_SPECIAL_TOKENS_URL = "$HF_BASE_URL/microsoft/Phi-3-mini-4k-instruct-onnx/resolve/main/cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/special_tokens_map.json"
-        
+
         // Directory names
         private const val MODELS_DIR = "models"
         private const val PHI3_DIR = "phi3"
-        private const val GEMMA_DIR = "gemma"
         private const val TINYLLAMA_DIR = "tinyllama"
     }
     
@@ -88,7 +86,6 @@ class ModelManager(private val context: Context) {
         val modelsDir = getModelsDirectory()
         val modelDir = when (modelType) {
             ModelType.PHI3_MINI -> File(modelsDir, PHI3_DIR)
-            ModelType.GEMMA_2B -> File(modelsDir, GEMMA_DIR)
             ModelType.TINY_LLAMA -> File(modelsDir, TINYLLAMA_DIR)
         }
         if (!modelDir.exists()) {
@@ -108,16 +105,12 @@ class ModelManager(private val context: Context) {
                 val modelDataFile = File(modelDir, PHI3_MODEL_DATA_NAME)
                 val tokenizerFile = File(modelDir, PHI3_TOKENIZER_NAME)
                 val tokenizerModelFile = File(modelDir, PHI3_TOKENIZER_MODEL_NAME)
-                
+
                 // Check if all essential files exist
-                modelFile.exists() && 
-                modelDataFile.exists() && 
-                tokenizerFile.exists() && 
+                modelFile.exists() &&
+                modelDataFile.exists() &&
+                tokenizerFile.exists() &&
                 tokenizerModelFile.exists()
-            }
-            ModelType.GEMMA_2B -> {
-                val modelDir = getModelDirectory(modelType)
-                File(modelDir, GEMMA_MODEL_NAME).exists()
             }
             ModelType.TINY_LLAMA -> {
                 val modelDir = getModelDirectory(modelType)
@@ -133,7 +126,6 @@ class ModelManager(private val context: Context) {
         val modelDir = getModelDirectory(modelType)
         return when (modelType) {
             ModelType.PHI3_MINI -> File(modelDir, PHI3_MODEL_NAME)
-            ModelType.GEMMA_2B -> File(modelDir, GEMMA_MODEL_NAME)
             ModelType.TINY_LLAMA -> File(modelDir, TINYLLAMA_MODEL_NAME)
         }
     }
@@ -145,10 +137,6 @@ class ModelManager(private val context: Context) {
         when (modelType) {
             ModelType.PHI3_MINI -> {
                 downloadPhi3Model()
-            }
-            ModelType.GEMMA_2B -> {
-                // TODO: Add actual Gemma download URLs
-                throw NotImplementedError("Gemma download not yet implemented")
             }
             ModelType.TINY_LLAMA -> {
                 // TODO: Add actual TinyLlama download URLs
@@ -289,7 +277,7 @@ class ModelManager(private val context: Context) {
             currentOperation = "Download complete! Model ready to use."
         ))
     }
-    
+
     /**
      * Download a single file with progress tracking
      */
@@ -452,7 +440,6 @@ class ModelManager(private val context: Context) {
     fun hasEnoughSpace(modelType: ModelType): Boolean {
         val requiredSpace = when (modelType) {
             ModelType.PHI3_MINI -> 2000L // 2GB
-            ModelType.GEMMA_2B -> 1000L  // 1GB
             ModelType.TINY_LLAMA -> 500L  // 500MB
         }
         return getAvailableStorage() > requiredSpace
@@ -465,6 +452,5 @@ enum class ModelType(
     val sizeMB: Int
 ) {
     PHI3_MINI("Phi-3 Mini", "3.8B", 1800),
-    GEMMA_2B("Gemma 2B", "2B", 800),
     TINY_LLAMA("TinyLlama", "1.1B", 350)
 }

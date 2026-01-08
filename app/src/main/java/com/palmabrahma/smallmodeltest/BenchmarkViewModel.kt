@@ -227,10 +227,6 @@ class BenchmarkViewModel(application: Application) : AndroidViewModel(applicatio
     private fun createModelAdapter(modelType: ModelType): BaseModelAdapter {
         return when (modelType) {
             ModelType.PHI3_MINI -> Phi3MiniAdapter(getApplication())
-            ModelType.GEMMA_2B -> {
-                // TODO: Implement Gemma adapter
-                throw NotImplementedError("Gemma 2B adapter not yet implemented")
-            }
             ModelType.TINY_LLAMA -> {
                 // TODO: Implement TinyLlama adapter
                 throw NotImplementedError("TinyLlama adapter not yet implemented")

@@ -96,7 +96,9 @@ class Phi3GenerateTokensTest {
             val results = adapter.generateTokens(prompt, maxTokens, temperature).toList()
 
             assertTrue("Should generate at least one token", results.isNotEmpty())
-            assertTrue("Should not exceed max tokens", results.size <= maxTokens)
+            // results includes final completion signal, so actual tokens = size - 1
+            val actualTokenCount = results.count { !it.isComplete }
+            assertTrue("Should not exceed max tokens", actualTokenCount <= maxTokens)
 
             // Validate result structure
             results.forEach { result ->
@@ -108,7 +110,8 @@ class Phi3GenerateTokensTest {
             val lastResult = results.last()
             assertTrue("Last result should be marked complete", lastResult.isComplete)
 
-            Timber.d("Generated ${results.size} tokens: '${results.joinToString("") { it.token }}'")
+            val fullText = results.joinToString("") { it.token }
+            Timber.d("Generated $actualTokenCount tokens: '$fullText'")
         }
 
         Timber.d("Simple prompt test completed in ${startTime}ms")
@@ -144,7 +147,8 @@ class Phi3GenerateTokensTest {
 
         try {
             val results = adapter.generateTokens(prompt, maxTokens, temperature).toList()
-            Timber.d("Empty prompt generated ${results.size} tokens")
+            val actualTokenCount = results.count { !it.isComplete }
+            Timber.d("Empty prompt generated $actualTokenCount tokens")
         } catch (e: Exception) {
             Timber.d("Empty prompt threw (expected): ${e.message}")
             // Empty prompt might fail, which is acceptable
@@ -161,11 +165,14 @@ class Phi3GenerateTokensTest {
 
         val results = adapter.generateTokens(prompt, maxTokens, temperature).toList()
 
-        assertTrue("Should not exceed max tokens", results.size <= maxTokens)
+        // Actual token count excludes the final completion signal
+        val actualTokenCount = results.count { !it.isComplete }
 
-        // Either we hit max tokens or hit EOS token
-        val lastComplete = results.lastOrNull()?.isComplete == true
-        assertTrue("Should either complete by EOS or hit max tokens", lastComplete || results.size == maxTokens)
+        assertTrue("Should not exceed max tokens", actualTokenCount <= maxTokens)
+
+        // Last result should always be marked complete
+        val lastResult = results.lastOrNull()
+        assertTrue("Last result should be marked complete", lastResult?.isComplete == true)
     }
 
     @Test
@@ -219,13 +226,15 @@ class Phi3GenerateTokensTest {
         val endTime = System.currentTimeMillis()
 
         val durationMs = endTime - startTime
+        // Actual token count excludes the final completion signal
+        val actualTokenCount = results.count { !it.isComplete }
         val tokensPerSecond = if (durationMs > 0) {
-            (results.size * 1000.0) / durationMs
+            (actualTokenCount * 1000.0) / durationMs
         } else {
             0.0
         }
 
-        Timber.d("Generated ${results.size} tokens in ${durationMs}ms = ${String.format("%.2f", tokensPerSecond)} tok/s")
+        Timber.d("Generated $actualTokenCount tokens in ${durationMs}ms = ${String.format("%.2f", tokensPerSecond)} tok/s")
         assertTrue("Should generate at least some tokens", results.isNotEmpty())
 
         // Sanity check: should be faster than 0.1 tokens/second (very generous)
@@ -300,8 +309,9 @@ class Phi3GenerateTokensTest {
 
         val results = adapter.generateTokens(longPrompt, maxTokens, temperature).toList()
 
-        assertTrue("Should generate tokens for long prompt", results.isNotEmpty())
-        Timber.d("Long prompt generated ${results.size} tokens")
+        val actualTokenCount = results.count { !it.isComplete }
+        assertTrue("Should generate tokens for long prompt", actualTokenCount > 0)
+        Timber.d("Long prompt generated $actualTokenCount tokens")
     }
 
     /**

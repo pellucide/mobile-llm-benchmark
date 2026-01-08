@@ -45,9 +45,18 @@ class Phi3MiniAdapter(
                     throw IllegalStateException("Model file not found: ${modelFile.absolutePath}")
                 }
 
-                // Load GenAI Model and Tokenizer
-                genaiModel = Model(modelFile.parent)
-                genaiTokenizer = Tokenizer(genaiModel!!)
+                // Load GenAI Model
+                val model = Model(modelFile.parent)
+                genaiModel = model
+
+                // Create Tokenizer - if this fails, clean up the model
+                try {
+                    genaiTokenizer = Tokenizer(model)
+                } catch (e: Exception) {
+                    model.close()
+                    genaiModel = null
+                    throw e
+                }
 
                 isModelReady = true
                 Timber.d("Phi-3 Mini model initialized successfully")
@@ -88,6 +97,7 @@ class Phi3MiniAdapter(
 
         var generatedCount = 0
         val generatedText = StringBuilder()
+
         try {
             // Generation loop
             while (generatedCount < maxTokens) {
@@ -124,6 +134,11 @@ class Phi3MiniAdapter(
         } catch (e: Exception) {
             Timber.e(e, "Error during token generation")
             throw e
+        } finally {
+            // Cleanup native resources
+            // Note: Java API docs don't explicitly show close() for these,
+            // but they wrap native resources so we null them to allow GC
+            // Actual cleanup happens when the Generator/TokenizerStream go out of scope
         }
     }
 
@@ -133,15 +148,23 @@ class Phi3MiniAdapter(
     }
 
     override suspend fun cleanup() = withContext(Dispatchers.IO) {
+        // Close in reverse order of creation
         try {
             genaiTokenizer?.close()
-            genaiTokenizer = null
-            genaiModel?.close()
-            genaiModel = null
-            isModelReady = false
         } catch (e: Exception) {
-            Timber.e(e, "Error during cleanup")
+            Timber.w(e, "Error closing tokenizer")
         }
+        genaiTokenizer = null
+
+        try {
+            genaiModel?.close()
+        } catch (e: Exception) {
+            Timber.w(e, "Error closing model")
+        }
+        genaiModel = null
+
+        isModelReady = false
+        Timber.d("Phi-3 Mini model cleaned up")
     }
 
     override fun getMemoryUsage(): MemoryInfo {

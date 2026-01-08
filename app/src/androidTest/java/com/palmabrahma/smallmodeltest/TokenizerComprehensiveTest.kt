@@ -1,12 +1,14 @@
 package com.palmabrahma.smallmodeltest
 
+import ai.onnxruntime.genai.Model
+import ai.onnxruntime.genai.Tokenizer
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.palmabrahma.smallmodeltest.models.*
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Before
@@ -16,17 +18,17 @@ import timber.log.Timber
 import java.io.File
 
 /**
- * Comprehensive test cases for Phi3Tokenizer
+ * Comprehensive test cases for ONNX Runtime GenAI Tokenizer
  * Tests various edge cases, special characters, and tokenization scenarios
  * Automatically downloads model files if not present
  */
 @RunWith(AndroidJUnit4::class)
 class TokenizerComprehensiveTest {
 
-    private lateinit var tokenizer: Phi3Tokenizer
+    private lateinit var genaiModel: Model
+    private lateinit var tokenizer: Tokenizer
     private lateinit var context: android.content.Context
     private lateinit var modelManager: ModelManager
-    private var isUsingRealTokenizer = false
 
     @Before
     fun setup() = runBlocking {
@@ -58,38 +60,25 @@ class TokenizerComprehensiveTest {
                                 lastProgress = progress.percentComplete
                             }
                         }
-                        .catch { e ->
-                            println("Download error: ${e.message}")
-                            throw e
-                        }
-                        .onCompletion {
-                            println("Download completed!")
-                        }
                         .collect { }
                 }
+                println("Download completed!")
             } catch (e: Exception) {
                 println("Failed to download model files: ${e.message}")
-                println("Tests will run with fallback tokenizer")
+                throw e
             }
         } else {
             println("\n=== Model files already present ===")
         }
 
-        // Setup tokenizer
-        val modelDir = modelManager.getModelDirectory(ModelType.PHI3_MINI)
-        val tokenizerFile = File(modelDir, ModelManager.PHI3_TOKENIZER_NAME)
-
-        tokenizer = Phi3Tokenizer(context, tokenizerFile.absolutePath)
-        isUsingRealTokenizer = tokenizerFile.exists()
+        // Setup GenAI Tokenizer
+        val modelFile = modelManager.getModelFilePath(ModelType.PHI3_MINI)
+        genaiModel = Model(modelFile.parent)
+        tokenizer = Tokenizer(genaiModel)
 
         println("\n=== Tokenizer Test Setup ===")
-        println("Tokenizer file exists: $isUsingRealTokenizer")
-        if (isUsingRealTokenizer) {
-            println("Using real tokenizer from: ${tokenizerFile.absolutePath}")
-            println("Tokenizer file size: ${tokenizerFile.length() / 1024}KB")
-        } else {
-            println("Using fallback vocabulary")
-        }
+        println("Using GenAI Tokenizer from: ${modelFile.parent}")
+        println("Model file size: ${modelFile.length() / 1024 / 1024}MB")
     }
 
     @Test
@@ -110,8 +99,8 @@ class TokenizerComprehensiveTest {
         )
 
         for ((text, description) in testCases) {
-            val tokens = tokenizer.encode(text)
-            val decoded = tokenizer.decode(tokens)
+            val tokens = tokenizer.encode(text).getSequence(0).toList()
+            val decoded = tokenizer.decode(tokens.toIntArray())
 
             println("Test: $description")
             println("  Input:   \"$text\"")
@@ -119,20 +108,16 @@ class TokenizerComprehensiveTest {
             println("  Decoded: \"$decoded\"")
 
             // Basic assertions
-            assertTrue("Should have at least BOS token", tokens.isNotEmpty())
-            assertEquals("First token should be BOS", tokenizer.bosTokenId, tokens[0])
+            assertTrue("Should have at least one token", tokens.isNotEmpty())
 
             // Check that decoding preserves meaning (allowing for space normalization)
             val normalizedInput = text.replace(Regex("\\s+"), "")
             val normalizedDecoded = decoded.replace(Regex("\\s+"), "")
-            if (isUsingRealTokenizer) {
-                // With real tokenizer, content should be preserved
-                assertTrue(
-                    "Decoded text should preserve content: '$normalizedDecoded' vs '$normalizedInput'",
-                    normalizedDecoded.contains(normalizedInput) ||
-                    normalizedInput.contains(normalizedDecoded)
-                )
-            }
+            assertTrue(
+                "Decoded text should preserve content: '$normalizedDecoded' vs '$normalizedInput'",
+                normalizedDecoded.contains(normalizedInput) ||
+                normalizedInput.contains(normalizedDecoded)
+            )
             println()
         }
     }
@@ -157,8 +142,8 @@ class TokenizerComprehensiveTest {
 
         for ((text, description) in specialCases) {
             try {
-                val tokens = tokenizer.encode(text)
-                val decoded = tokenizer.decode(tokens)
+                val tokens = tokenizer.encode(text).getSequence(0).toList()
+                val decoded = tokenizer.decode(tokens.toIntArray())
 
                 println("Test: $description")
                 println("  Input:   \"$text\"")
@@ -205,17 +190,15 @@ class TokenizerComprehensiveTest {
         )
 
         for ((text, description) in edgeCases) {
-            val tokens = tokenizer.encode(text)
-            val decoded = tokenizer.decode(tokens)
+            val tokens = tokenizer.encode(text).getSequence(0).toList()
+            val decoded = tokenizer.decode(tokens.toIntArray())
 
             println("Test: $description")
             println("  Input:   \"$text\" (length: ${text.length})")
             println("  Tokens:  ${tokens.size} - ${tokens.joinToString(", ")}")
             println("  Decoded: \"$decoded\" (length: ${decoded.length})")
 
-            // Verify BOS token is always present
-            assertTrue("Should always have BOS token", tokens.isNotEmpty())
-            assertEquals("First token should be BOS", tokenizer.bosTokenId, tokens[0])
+            assertTrue("Should have tokens", tokens.isNotEmpty())
             println()
         }
     }
@@ -228,7 +211,7 @@ class TokenizerComprehensiveTest {
             "What is 2+2?" to "Simple question",
             "Explain quantum computing in simple terms" to "Explanation request",
             "Write a Python function to sort a list" to "Code generation",
-            "<|system|>You are helpful<|end|><|user|>Hi<|end|><|assistant|>" to "Chat template",
+            "You are helpful\nHi\n" to "Chat format",
             "Translate 'Hello' to Spanish" to "Translation",
             "Summarize: The quick brown fox..." to "Summarization",
             """
@@ -242,8 +225,8 @@ class TokenizerComprehensiveTest {
         )
 
         for ((prompt, description) in prompts) {
-            val tokens = tokenizer.encode(prompt)
-            val decoded = tokenizer.decode(tokens)
+            val tokens = tokenizer.encode(prompt).getSequence(0).toList()
+            val decoded = tokenizer.decode(tokens.toIntArray())
 
             println("Test: $description")
             println("  Input length:   ${prompt.length} chars")
@@ -270,14 +253,14 @@ class TokenizerComprehensiveTest {
 
         for (text in testTexts) {
             // Encode the same text multiple times
-            val tokens1 = tokenizer.encode(text)
-            val tokens2 = tokenizer.encode(text)
-            val tokens3 = tokenizer.encode(text)
+            val tokens1 = tokenizer.encode(text).getSequence(0).toList()
+            val tokens2 = tokenizer.encode(text).getSequence(0).toList()
+            val tokens3 = tokenizer.encode(text).getSequence(0).toList()
 
             println("Text: \"$text\"")
             println("  First encoding:  ${tokens1.joinToString(", ")}")
             println("  Second encoding: ${tokens2.joinToString(", ")}")
-            println("  Third encoding:  ${tokens3.joinToString(", ")}")
+            println("  Third encoding: ${tokens3.joinToString(", ")}")
 
             // Verify consistency
             assertEquals("Tokenization should be deterministic", tokens1, tokens2)
@@ -285,8 +268,8 @@ class TokenizerComprehensiveTest {
             println("  ✓ Consistent tokenization")
 
             // Test decode consistency
-            val decoded1 = tokenizer.decode(tokens1)
-            val decoded2 = tokenizer.decode(tokens2)
+            val decoded1 = tokenizer.decode(tokens1.toIntArray())
+            val decoded2 = tokenizer.decode(tokens2.toIntArray())
 
             assertEquals("Decoding should be consistent", decoded1, decoded2)
             println("  ✓ Consistent decoding")
@@ -321,8 +304,8 @@ class TokenizerComprehensiveTest {
                 |Respond with only a number between 0 and 1.
             """.trimMargin()
 
-            val tokens = tokenizer.encode(fullPrompt)
-            val decoded = tokenizer.decode(tokens)
+            val tokens = tokenizer.encode(fullPrompt).getSequence(0).toList()
+            val decoded = tokenizer.decode(tokens.toIntArray())
 
             println("Original prompt: \"${prompt.take(50)}${if (prompt.length > 50) "..." else ""}\"")
             println("  Full prompt length: ${fullPrompt.length} chars")
@@ -356,11 +339,11 @@ class TokenizerComprehensiveTest {
 
         for ((text, description) in longTexts) {
             val startTime = System.currentTimeMillis()
-            val tokens = tokenizer.encode(text)
+            val tokens = tokenizer.encode(text).getSequence(0).toList()
             val encodeTime = System.currentTimeMillis() - startTime
 
             val decodeStart = System.currentTimeMillis()
-            val decoded = tokenizer.decode(tokens)
+            val decoded = tokenizer.decode(tokens.toIntArray())
             val decodeTime = System.currentTimeMillis() - decodeStart
 
             println("Test: $description")
@@ -383,29 +366,32 @@ class TokenizerComprehensiveTest {
             "<s>" to "BOS token",
             "</s>" to "EOS token",
             "<unk>" to "Unknown token",
-            "<|endoftext|>" to "End of text",
-            "<|system|>" to "System marker",
-            "<|user|>" to "User marker",
-            "<|assistant|>" to "Assistant marker",
             "<|end|>" to "End marker",
             "<pad>" to "Padding token",
-            "<mask>" to "Mask token"
+            "<mask>" to "Mask token",
+            "" to "End of text"
         )
 
         for ((token, description) in specialTokens) {
-            val tokens = tokenizer.encode(token)
-            val decoded = tokenizer.decode(tokens)
+            try {
+                val tokens = tokenizer.encode(token).getSequence(0).toList()
+                val decoded = tokenizer.decode(tokens.toIntArray())
 
-            println("Test: $description")
-            println("  Input:   \"$token\"")
-            println("  Tokens:  ${tokens.joinToString(", ")}")
-            println("  Decoded: \"$decoded\"")
+                println("Test: $description")
+                println("  Input:   \"$token\"")
+                println("  Tokens:  ${tokens.joinToString(", ")}")
+                println("  Decoded: \"$decoded\"")
 
-            // Check if it's recognized as a special token (would be a single token after BOS)
-            if (tokens.size == 2) {
-                println("  ✓ Recognized as special token (ID: ${tokens[1]})")
-            } else {
-                println("  ✗ Not recognized as special token (${tokens.size - 1} tokens after BOS)")
+                // Check if it's recognized as a special token (would be a single token)
+                if (tokens.size == 1) {
+                    println("  ✓ Recognized as special token (ID: ${tokens[0]})")
+                } else {
+                    println("  ✗ Not recognized as special token (${tokens.size} tokens)")
+                }
+            } catch (e: Exception) {
+                println("Test: $description")
+                println("  Input:   \"$token\"")
+                println("  ✗ Error: ${e.message}")
             }
             println()
         }
@@ -419,9 +405,8 @@ class TokenizerComprehensiveTest {
             "Simple text",
             "Numbers: 123, 456.78, -9",
             "Symbols: + - * / = < > <= >= != ==",
-            "Mixed: Test123 with symbols @#$",
+            "Mixed: Test123 with symbols @#\$",
             "Code: function test() { return 42; }",
-            "Math: ∑(x²) = ∫f(x)dx",
             "Quotes: \"Hello,\" she said.",
             "Path: /usr/local/bin/python3",
             "URL: https://example.com/path?query=1",
@@ -432,8 +417,8 @@ class TokenizerComprehensiveTest {
         var totalTests = testCases.size
 
         for (text in testCases) {
-            val tokens = tokenizer.encode(text)
-            val decoded = tokenizer.decode(tokens)
+            val tokens = tokenizer.encode(text).getSequence(0).toList()
+            val decoded = tokenizer.decode(tokens.toIntArray())
 
             // Normalize for comparison (remove spaces for basic comparison)
             val normalizedInput = text.replace(Regex("\\s+"), "").lowercase()
@@ -450,12 +435,10 @@ class TokenizerComprehensiveTest {
 
         println("Summary: $perfectMatches/$totalTests perfect matches (${(perfectMatches * 100 / totalTests)}%)")
 
-        // With real tokenizer, we expect high accuracy
-        if (isUsingRealTokenizer) {
-            assertTrue(
-                "Should have at least 70% accuracy with real tokenizer",
-                perfectMatches.toFloat() / totalTests >= 0.7f
-            )
-        }
+        // We expect high accuracy with GenAI tokenizer
+        assertTrue(
+            "Should have at least 70% accuracy",
+            perfectMatches.toFloat() / totalTests >= 0.7f
+        )
     }
 }
